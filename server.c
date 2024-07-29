@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <complex.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -20,7 +21,12 @@ typedef struct server {
 typedef struct request {
   char method[10];
   char route[100];
+  char protocol_version[100];
 } request_t;
+
+typedef struct response {
+  uint16_t status;
+} response_t;
 
 server_t create_server(uint16_t port, uint32_t address);
 void bind_socket(server_t *server_data);
@@ -42,7 +48,7 @@ int main() {
     int client_socketfd = accept(server_data.socketfd, NULL, NULL);
 
     if (client_socketfd == -1) {
-      printf("ERROR while accepting client socket!\n errno: %d\n%s\n", errno,
+      printf("ERROR while accepting client socket!\nerrno: %d\n%s\n", errno,
              strerror(errno));
       exit(EXIT_FAILURE);
     }
@@ -51,7 +57,7 @@ int main() {
     int read_value = read(client_socketfd, request_data, REQUEST_SIZE);
 
     if (read_value == -1) {
-      printf("ERROR while reading socket data!\n errno: %d\n%s\n", errno,
+      printf("ERROR while reading socket data!\nerrno: %d\n%s\n", errno,
              strerror(errno));
       exit(EXIT_FAILURE);
     }
@@ -59,8 +65,29 @@ int main() {
     request_t req = parse_request_data(request_data);
     free(request_data);
 
-    printf("%s %s\n", req.method, req.route);
-  };
+    printf("%s %s %s\n", req.method, req.route, req.protocol_version);
+
+    if (strcmp(req.route, "/") == 0) {
+      const char *response = "HTTP/1.1 200 OK\n"
+                             "Content-Type: text/plain\n"
+                             "Content-Length: 12\n"
+                             "Accept-Ranges: bytes\n"
+                             "Connection: close\n"
+                             "\n"
+                             "Hello World!";
+
+      send(client_socketfd, response, strlen(response), 0);
+    } else {
+      const char *response = "HTTP/1.1 404 Not Found\n"
+                             "Content-Type: text/plain\n"
+                             "Content-Length: 13\n"
+                             "Accept-Ranges: bytes\n"
+                             "Connection: close\n"
+                             "\n"
+                             "404 Not Found";
+      send(client_socketfd, response, strlen(response), 0);
+    }
+  }
 
   return 0;
 }
@@ -68,7 +95,7 @@ int main() {
 server_t create_server(uint16_t port, uint32_t address) {
   int socketfd = socket(AF_INET, SOCK_STREAM, 0);
   if (socketfd == -1) {
-    printf("ERROR while creating a socket!\n errno: %d\n%s\n", errno,
+    printf("ERROR while creating a socket!\nerrno: %d\n%s\n", errno,
            strerror(errno));
     exit(EXIT_FAILURE);
   };
@@ -84,7 +111,7 @@ void bind_socket(server_t *server_data) {
       bind(server_data->socketfd, (struct sockaddr *)&server_data->address,
            sizeof(server_data->address));
   if (bind_value == -1) {
-    printf("ERROR while binding a socket!\n errno: %d\n%s\n", errno,
+    printf("ERROR while binding a socket!\nerrno: %d\n%s\n", errno,
            strerror(errno));
     exit(EXIT_FAILURE);
   }
@@ -108,9 +135,9 @@ void get_server_info(server_t *server_data) {
       NI_NUMERICHOST | NI_NUMERICSERV);
 
   if (name_info_value != 0) {
-    printf(
-        "ERROR while trying to get server socket information!\n Error: %d %s\n",
-        name_info_value, gai_strerror(name_info_value));
+    printf("ERROR while trying to get server socket information!\nError: %d\n "
+           "%s\n",
+           name_info_value, gai_strerror(name_info_value));
     exit(EXIT_FAILURE);
   }
 
@@ -119,9 +146,10 @@ void get_server_info(server_t *server_data) {
 
 request_t parse_request_data(char *request_data) {
   request_t req;
-  int matched_no = sscanf(request_data, "%s %s", req.method, req.route);
+  int matched_no = sscanf(request_data, "%s %s %s", req.method, req.route,
+                          req.protocol_version);
 
-  if (matched_no != 2) {
+  if (errno != 0) {
     printf("ERROR while parsing a request!\nerrno: %d\n%s\n", errno,
            strerror(errno));
     exit(EXIT_FAILURE);
